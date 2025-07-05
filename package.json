@@ -1,0 +1,15 @@
+{
+  "name": "setup",
+  "version": "1.0.0",
+  "description": "WhatsApp simple con n8n",
+  "main": "setup.js",
+  "scripts": {
+    "start": "node setup.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "node-fetch": "^3.3.2",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.23.0"
+  }
+}
