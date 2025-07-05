@@ -2,14 +2,17 @@ const { Client, LocalAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode-terminal");
 const express = require("express");
 const fetch = require("node-fetch");
-require("dotenv").config();
 
 const app = express();
 app.use(express.json());
 
 let client;
 let isReady = false;
-let qrString = "";
+let qrString = null;
+
+const N8N_WEBHOOK_URL =
+  process.env.N8N_WEBHOOK_URL ||
+  "https://n8n.srv895959.hstgr.cloud/webhook-test/2c7ead7f-8f29-4727-854b-d2a8f20ff76a";
 
 function initWhatsApp() {
   client = new Client({
@@ -26,8 +29,10 @@ function initWhatsApp() {
         "--no-first-run",
         "--no-zygote",
         "--disable-gpu",
-        "--disable-web-security",
-        "--disable-features=VizDisplayCompositor",
+        "--disable-extensions",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding",
       ],
     },
   });
@@ -44,18 +49,18 @@ function initWhatsApp() {
     console.log("✅ ¡WhatsApp conectado exitosamente!");
     console.log("📞 Número conectado:", client.info.wid.user);
     isReady = true;
-    qrString = "";
+    qrString = null;
   });
 
   client.on("auth_failure", () => {
     console.error("❌ Error de autenticación");
-    isReady = false;
+    qrString = null;
   });
 
-  client.on("disconnected", (reason) => {
-    console.log("⚠️ WhatsApp desconectado:", reason);
+  client.on("disconnected", () => {
+    console.log("⚠️ WhatsApp desconectado");
     isReady = false;
-    qrString = "";
+    qrString = null;
   });
 
   client.on("message", async (message) => {
@@ -76,15 +81,12 @@ function initWhatsApp() {
         },
       };
 
-      const webhookUrl = process.env.N8N_WEBHOOK_URL;
-      if (webhookUrl) {
-        await fetch(webhookUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(messageData),
-        });
-        console.log("✅ Mensaje enviado a n8n");
-      }
+      await fetch(N8N_WEBHOOK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(messageData),
+      });
+      console.log("✅ Mensaje enviado a n8n");
     } catch (error) {
       console.error("❌ Error enviando a n8n:", error.message);
     }
@@ -93,31 +95,14 @@ function initWhatsApp() {
   client.initialize();
 }
 
-// Endpoint para mostrar QR en el navegador
+// Endpoint para obtener QR (útil para interfaces web)
 app.get("/qr", (req, res) => {
   if (qrString) {
-    res.send(`
-      <html>
-        <head><title>WhatsApp QR</title></head>
-        <body style="text-align: center; font-family: Arial;">
-          <h2>Escanea con WhatsApp</h2>
-          <div id="qrcode"></div>
-          <p>Ve a WhatsApp > Configuración > Dispositivos vinculados</p>
-          <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
-          <script>
-            QRCode.toCanvas(document.getElementById('qrcode'), '${qrString}', function (error) {
-              if (error) console.error(error);
-            });
-          </script>
-        </body>
-      </html>
-    `);
+    res.json({ qr: qrString, status: "waiting" });
   } else if (isReady) {
-    res.send("<h2>✅ WhatsApp ya está conectado</h2>");
+    res.json({ qr: null, status: "connected" });
   } else {
-    res.send(
-      "<h2>⏳ Generando QR...</h2><script>setTimeout(() => location.reload(), 3000);</script>"
-    );
+    res.json({ qr: null, status: "initializing" });
   }
 });
 
@@ -125,7 +110,8 @@ app.post("/send-message", async (req, res) => {
   try {
     if (!isReady) {
       return res.status(400).json({
-        error: "WhatsApp no está conectado. Visita /qr para conectar.",
+        error: "WhatsApp no está conectado",
+        status: qrString ? "waiting_qr" : "initializing",
       });
     }
 
@@ -147,6 +133,7 @@ app.post("/send-message", async (req, res) => {
       messageId: result.id._serialized,
       to: phone,
       message: message,
+      timestamp: new Date().toISOString(),
     });
   } catch (error) {
     console.error("❌ Error enviando mensaje:", error);
@@ -162,6 +149,7 @@ app.get("/status", (req, res) => {
     connected: isReady,
     phone: isReady ? client.info?.wid?.user : null,
     hasQR: !!qrString,
+    timestamp: new Date().toISOString(),
   });
 });
 
@@ -170,19 +158,28 @@ app.get("/", (req, res) => {
     service: "WhatsApp API",
     status: isReady ? "connected" : "disconnected",
     endpoints: {
-      "GET /": "Esta información",
       "GET /status": "Estado de conexión",
-      "GET /qr": "Mostrar QR para conectar",
-      "POST /send-message": "Enviar mensaje (body: {phone, message})",
+      "GET /qr": "Obtener código QR",
+      "POST /send-message": "Enviar mensaje",
     },
   });
+});
+
+app.post("/webhook", (req, res) => {
+  console.log("📨 Webhook recibido:", req.body);
+  res.json({ received: true });
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Servidor iniciado en puerto ${PORT}`);
   console.log(`📡 API disponible en: http://localhost:${PORT}`);
-  console.log(`🔲 QR disponible en: http://localhost:${PORT}/qr`);
+  console.log("\n📋 Endpoints:");
+  console.log("   GET  / - Información del servicio");
+  console.log("   GET  /status - Estado de conexión");
+  console.log("   GET  /qr - Obtener código QR");
+  console.log("   POST /send-message - Enviar mensaje");
+  console.log(`\n🔗 N8N Webhook: ${N8N_WEBHOOK_URL}`);
   console.log("\n⏳ Iniciando WhatsApp...\n");
 
   initWhatsApp();
