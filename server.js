@@ -5,6 +5,7 @@ const fetch = require("node-fetch");
 
 const app = express();
 app.use(express.json());
+app.use(express.static('public'));
 
 let client;
 let isReady = false;
@@ -153,7 +154,7 @@ app.get("/status", (req, res) => {
   });
 });
 
-app.get("/", (req, res) => {
+app.get("/api", (req, res) => {
   res.json({
     service: "WhatsApp API",
     status: isReady ? "connected" : "disconnected",

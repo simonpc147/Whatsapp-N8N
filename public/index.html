@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp API - Panel de Control</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f2f5;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            max-width: 500px;
+            width: 100%;
+            text-align: center;
+        }
+        .header {
+            margin-bottom: 30px;
+        }
+        .header h1 {
+            color: #25D366;
+            margin: 0;
+            font-size: 24px;
+        }
+        .status {
+            padding: 10px 20px;
+            border-radius: 25px;
+            font-weight: bold;
+            margin: 20px 0;
+            display: inline-block;
+        }
+        .status.connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .status.waiting {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        .status.disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .qr-container {
+            margin: 20px 0;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            border: 2px dashed #dee2e6;
+        }
+        .qr-code {
+            max-width: 256px;
+            max-height: 256px;
+            margin: 0 auto;
+            display: block;
+        }
+        .user-info {
+            margin: 20px 0;
+            padding: 20px;
+            background-color: #e8f5e8;
+            border-radius: 8px;
+            border-left: 4px solid #25D366;
+        }
+        .user-info h3 {
+            margin: 0 0 10px 0;
+            color: #25D366;
+        }
+        .user-phone {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+        }
+        .instructions {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #e7f3ff;
+            border-radius: 8px;
+            border-left: 4px solid #0066cc;
+            text-align: left;
+        }
+        .instructions h4 {
+            margin: 0 0 10px 0;
+            color: #0066cc;
+        }
+        .instructions ol {
+            margin: 0;
+            padding-left: 20px;
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #25D366;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .webhook-info {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+        }
+        .webhook-info h4 {
+            margin: 0 0 10px 0;
+            color: #495057;
+        }
+        .webhook-url {
+            font-family: monospace;
+            background-color: #e9ecef;
+            padding: 8px;
+            border-radius: 4px;
+            word-break: break-all;
+            font-size: 12px;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔗 WhatsApp API</h1>
+            <p>Panel de Control y Conexión</p>
+        </div>
+
+        <div id="status" class="status disconnected">
+            🔄 Inicializando...
+        </div>
+
+        <div id="qr-section" class="qr-container hidden">
+            <h3>📱 Escanea el código QR</h3>
+            <img id="qr-image" class="qr-code" alt="Código QR">
+            <div class="instructions">
+                <h4>Instrucciones:</h4>
+                <ol>
+                    <li>Abre WhatsApp en tu teléfono</li>
+                    <li>Ve a Configuración > Dispositivos vinculados</li>
+                    <li>Toca "Vincular un dispositivo"</li>
+                    <li>Escanea este código QR</li>
+                </ol>
+            </div>
+        </div>
+
+        <div id="user-info" class="user-info hidden">
+            <h3>✅ Usuario Conectado</h3>
+            <div class="user-phone" id="user-phone">+1234567890</div>
+            <p>WhatsApp conectado exitosamente</p>
+        </div>
+
+        <div id="loading" class="loader hidden"></div>
+
+        <div class="webhook-info">
+            <h4>🔗 Webhook n8n</h4>
+            <div class="webhook-url" id="webhook-url">
+                Cargando configuración...
+            </div>
+            <p><small>Los mensajes recibidos se enviarán automáticamente a este webhook</small></p>
+        </div>
+
+        <div style="margin-top: 30px; font-size: 12px; color: #666;">
+            <p>Última actualización: <span id="last-update">--</span></p>
+        </div>
+    </div>
+
+    <script>
+        let pollInterval;
+        let webhookUrl = '';
+
+        // Función para actualizar el estado
+        async function updateStatus() {
+            try {
+                const response = await fetch('/status');
+                const data = await response.json();
+                
+                const statusElement = document.getElementById('status');
+                const qrSection = document.getElementById('qr-section');
+                const userInfo = document.getElementById('user-info');
+                const loading = document.getElementById('loading');
+                const userPhone = document.getElementById('user-phone');
+                const lastUpdate = document.getElementById('last-update');
+
+                lastUpdate.textContent = new Date().toLocaleTimeString();
+
+                if (data.connected) {
+                    // Usuario conectado
+                    statusElement.className = 'status connected';
+                    statusElement.textContent = '✅ Conectado';
+                    
+                    qrSection.classList.add('hidden');
+                    loading.classList.add('hidden');
+                    userInfo.classList.remove('hidden');
+                    
+                    if (data.phone) {
+                        userPhone.textContent = '+' + data.phone;
+                    }
+                    
+                    // Reducir frecuencia de polling cuando está conectado
+                    if (pollInterval) {
+                        clearInterval(pollInterval);
+                        pollInterval = setInterval(updateStatus, 10000); // Cada 10 segundos
+                    }
+                } else if (data.hasQR) {
+                    // Mostrar QR
+                    statusElement.className = 'status waiting';
+                    statusElement.textContent = '📱 Esperando escaneo QR';
+                    
+                    await loadQR();
+                    qrSection.classList.remove('hidden');
+                    loading.classList.add('hidden');
+                    userInfo.classList.add('hidden');
+                } else {
+                    // Inicializando
+                    statusElement.className = 'status disconnected';
+                    statusElement.textContent = '🔄 Inicializando...';
+                    
+                    qrSection.classList.add('hidden');
+                    loading.classList.remove('hidden');
+                    userInfo.classList.add('hidden');
+                }
+            } catch (error) {
+                console.error('Error al actualizar estado:', error);
+                document.getElementById('status').textContent = '❌ Error de conexión';
+                document.getElementById('status').className = 'status disconnected';
+            }
+        }
+
+        // Función para cargar el QR
+        async function loadQR() {
+            try {
+                const response = await fetch('/qr');
+                const data = await response.json();
+                
+                if (data.qr) {
+                    // Generar imagen QR usando API de Google Charts
+                    const qrImage = document.getElementById('qr-image');
+                    qrImage.src = `https://api.qrserver.com/v1/create-qr-code/?size=256x256&data=${encodeURIComponent(data.qr)}`;
+                    qrImage.style.display = 'block';
+                }
+            } catch (error) {
+                console.error('Error al cargar QR:', error);
+            }
+        }
+
+        // Función para cargar configuración del webhook
+        async function loadWebhookConfig() {
+            try {
+                const response = await fetch('/');
+                const data = await response.json();
+                
+                // El webhook URL debería estar en la configuración del servidor
+                // Por ahora lo obtenemos de una variable de entorno o configuración
+                document.getElementById('webhook-url').textContent = 
+                    'https://n8n.srv895959.hstgr.cloud/webhook-test/2c7ead7f-8f29-4727-854b-d2a8f20ff76a';
+            } catch (error) {
+                console.error('Error al cargar configuración:', error);
+                document.getElementById('webhook-url').textContent = 'Error al cargar configuración';
+            }
+        }
+
+        // Inicializar cuando se carga la página
+        document.addEventListener('DOMContentLoaded', function() {
+            updateStatus();
+            loadWebhookConfig();
+            
+            // Polling cada 3 segundos inicialmente
+            pollInterval = setInterval(updateStatus, 3000);
+        });
+
+        // Limpiar interval al cerrar/recargar la página
+        window.addEventListener('beforeunload', function() {
+            if (pollInterval) {
+                clearInterval(pollInterval);
+            }
+        });
+    </script>
+</body>
+</html>
