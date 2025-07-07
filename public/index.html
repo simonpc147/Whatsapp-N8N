@@ -113,25 +113,6 @@
           transform: rotate(360deg);
         }
       }
-      .webhook-info {
-        margin: 20px 0;
-        padding: 15px;
-        background-color: #f8f9fa;
-        border-radius: 8px;
-        border: 1px solid #dee2e6;
-      }
-      .webhook-info h4 {
-        margin: 0 0 10px 0;
-        color: #495057;
-      }
-      .webhook-url {
-        font-family: monospace;
-        background-color: #e9ecef;
-        padding: 8px;
-        border-radius: 4px;
-        word-break: break-all;
-        font-size: 12px;
-      }
       .hidden {
         display: none;
       }
@@ -175,12 +156,11 @@
 
     <script>
       let pollInterval;
-      let webhookUrl = "";
 
       // Función para actualizar el estado
       async function updateStatus() {
         try {
-          const response = await fetch("/status");
+          const response = await fetch("/api/status");
           const data = await response.json();
 
           const statusElement = document.getElementById("status");
@@ -239,7 +219,7 @@
       // Función para cargar el QR
       async function loadQR() {
         try {
-          const response = await fetch("/qr");
+          const response = await fetch("/api/qr");
           const data = await response.json();
 
           if (data.qr) {
@@ -255,27 +235,9 @@
         }
       }
 
-      // Función para cargar configuración del webhook
-      async function loadWebhookConfig() {
-        try {
-          const response = await fetch("/");
-          const data = await response.json();
-
-          // El webhook URL debería estar en la configuración del servidor
-          // Por ahora lo obtenemos de una variable de entorno o configuración
-          document.getElementById("webhook-url").textContent =
-            "https://n8n.srv895959.hstgr.cloud/webhook-test/2c7ead7f-8f29-4727-854b-d2a8f20ff76a";
-        } catch (error) {
-          console.error("Error al cargar configuración:", error);
-          document.getElementById("webhook-url").textContent =
-            "Error al cargar configuración";
-        }
-      }
-
       // Inicializar cuando se carga la página
       document.addEventListener("DOMContentLoaded", function () {
         updateStatus();
-        loadWebhookConfig();
 
         // Polling cada 3 segundos inicialmente
         pollInterval = setInterval(updateStatus, 3000);
