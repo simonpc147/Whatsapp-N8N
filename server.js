@@ -168,8 +168,6 @@ app.post("/api/send-message", async (req, res) => {
 
 // Endpoint para obtener estado vía HTTP
 app.get("/api/status", (req, res) => {
-  console.log(`📊 HTTP REQUEST - Estado de WhatsApp`);
-
   const statusData = {
     connected: isReady,
     phone: isReady ? client?.info?.wid?.user : null,
@@ -651,65 +649,17 @@ function initWhatsApp() {
       new Date(message.timestamp * 1000).toISOString()
     );
 
-    // Debug completo del objeto mensaje
-    console.log(
-      "   🔍 OBJETO COMPLETO:",
-      JSON.stringify(
-        {
-          id: message.id,
-          body: message.body,
-          type: message.type,
-          from: message.from,
-          to: message.to,
-          hasMedia: message.hasMedia,
-          isStatus: message.isStatus,
-          fromMe: message.fromMe,
-          isGroup: message.isGroup,
-        },
-        null,
-        2
-      )
-    );
-
-    // Filtrar solo mensajes directos (no grupos, no estados)
-    if (message.from === "status@broadcast") {
-      console.log("   ⏭️ Ignorando: Estado de WhatsApp");
+    if (
+      message.from === "status@broadcast" ||
+      message.isStatus ||
+      message.fromMe ||
+      message.isGroup ||
+      message.from.includes("@g.us") ||
+      !message.body ||
+      message.body.trim() === ""
+    ) {
       return;
     }
-
-    if (message.isStatus) {
-      console.log("   ⏭️ Ignorando: Estado/Story de WhatsApp");
-      return;
-    }
-
-    if (message.fromMe) {
-      console.log("   ⏭️ Ignorando: Mensaje enviado por mí");
-      return;
-    }
-
-    if (message.isGroup) {
-      console.log("   ⏭️ Ignorando: Mensaje de grupo");
-      return;
-    }
-
-    if (message.from.includes("@g.us")) {
-      console.log("   ⏭️ Ignorando: Chat de grupo");
-      return;
-    }
-
-    // Verificar si el mensaje tiene contenido
-    if (!message.body || message.body.trim() === "") {
-      console.log(
-        "   ⏭️ Ignorando: Mensaje sin contenido (posiblemente media, reacción, etc.)"
-      );
-      console.log("   📋 Tipo de mensaje:", message.type);
-      if (message.hasMedia) {
-        console.log("   📎 El mensaje contiene media");
-      }
-      return;
-    }
-
-    console.log("   ✅ Procesando: Mensaje directo válido");
 
     try {
       console.log("   🔍 Obteniendo información del contacto...");
