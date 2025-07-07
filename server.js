@@ -4,6 +4,8 @@ const express = require("express");
 const fetch = require("node-fetch");
 const http = require("http");
 const socketIo = require("socket.io");
+const fs = require("fs");
+const path = require("path");
 
 const app = express();
 const server = http.createServer(app);
@@ -22,10 +24,78 @@ let client;
 let isReady = false;
 let qrString = null;
 let connectedSockets = new Set();
+let sessionPath = "./whatsapp-session"; // Variable para el path de sesión
 
 const N8N_WEBHOOK_URL =
   process.env.N8N_WEBHOOK_URL ||
   "https://n8n.srv895959.hstgr.cloud/webhook-test/2c7ead7f-8f29-4727-854b-d2a8f20ff76a";
+
+// ========================================
+// FUNCIONES DE LIMPIEZA DE SESIÓN
+// ========================================
+
+function deleteSessionFolder() {
+  return new Promise((resolve) => {
+    if (!fs.existsSync(sessionPath)) {
+      console.log("🧹 No hay carpeta de sesión para eliminar");
+      resolve();
+      return;
+    }
+
+    console.log("🧹 Eliminando carpeta de sesión:", sessionPath);
+
+    // Función recursiva para eliminar directorio con reintentos
+    const deleteWithRetry = (dirPath, retries = 5) => {
+      setTimeout(() => {
+        try {
+          if (fs.existsSync(dirPath)) {
+            // Cambiar permisos antes de eliminar (Windows)
+            if (process.platform === "win32") {
+              try {
+                require("child_process").execSync(
+                  `attrib -R "${dirPath}\\*.*" /S`,
+                  { stdio: "ignore" }
+                );
+              } catch (e) {
+                // Ignorar error de attrib
+              }
+            }
+
+            fs.rmSync(dirPath, { recursive: true, force: true });
+            console.log("✅ Carpeta de sesión eliminada exitosamente");
+          }
+          resolve();
+        } catch (error) {
+          console.log(
+            `⚠️ Error eliminando sesión (intento ${6 - retries}/5):`,
+            error.message
+          );
+
+          if (retries > 0) {
+            deleteWithRetry(dirPath, retries - 1);
+          } else {
+            console.log(
+              "❌ No se pudo eliminar la carpeta de sesión después de 5 intentos"
+            );
+            console.log(
+              "💡 Puede que necesites eliminarla manualmente:",
+              dirPath
+            );
+            resolve();
+          }
+        }
+      }, 1000); // Esperar 1 segundo antes de intentar
+    };
+
+    deleteWithRetry(sessionPath);
+  });
+}
+
+function generateNewSessionPath() {
+  sessionPath = `./whatsapp-session-${Date.now()}`;
+  console.log("📁 Nueva ruta de sesión:", sessionPath);
+  return sessionPath;
+}
 
 // ========================================
 // HTTP ENDPOINTS (REST API)
@@ -125,22 +195,56 @@ app.get("/api/qr", (req, res) => {
 });
 
 // Endpoint para reiniciar WhatsApp vía HTTP
-app.post("/api/restart", (req, res) => {
+app.post("/api/restart", async (req, res) => {
   console.log(`🔄 HTTP REQUEST - Reinicio de WhatsApp`);
 
   if (client) {
-    client.destroy();
+    try {
+      await client.destroy();
+    } catch (error) {
+      console.log("⚠️ Error destruyendo cliente:", error.message);
+    }
   }
+
+  // Limpiar sesión antes de reiniciar
+  await deleteSessionFolder();
 
   setTimeout(() => {
     initWhatsApp();
-  }, 2000);
+  }, 3000); // Esperar 3 segundos después de limpiar
 
   res.json({
     success: true,
-    message: "Reinicio iniciado",
+    message: "Reinicio iniciado con limpieza de sesión",
     timestamp: new Date().toISOString(),
   });
+});
+
+// Agregar endpoint para limpiar sesión manualmente
+app.post("/api/clean-session", async (req, res) => {
+  console.log(`🧹 HTTP REQUEST - Limpieza manual de sesión`);
+
+  try {
+    if (client) {
+      await client.destroy();
+      isReady = false;
+      qrString = null;
+    }
+
+    await deleteSessionFolder();
+
+    res.json({
+      success: true,
+      message: "Sesión limpiada exitosamente",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: "Error limpiando sesión",
+      details: error.message,
+    });
+  }
 });
 
 // Endpoint para obtener información de contacto vía HTTP
@@ -402,15 +506,28 @@ io.on("connection", (socket) => {
   });
 
   // Manejar reinicio de WhatsApp vía Socket.IO
-  socket.on("restart_whatsapp", () => {
+  socket.on("restart_whatsapp", async () => {
     console.log(`🔄 Socket.IO - Cliente ${socket.id} solicita reinicio`);
+
     if (client) {
-      client.destroy();
+      try {
+        await client.destroy();
+      } catch (error) {
+        console.log("⚠️ Error destruyendo cliente:", error.message);
+      }
     }
+
+    // Limpiar sesión antes de reiniciar
+    await deleteSessionFolder();
+
     setTimeout(() => {
       initWhatsApp();
-    }, 2000);
-    socket.emit("restart_initiated", { timestamp: new Date().toISOString() });
+    }, 3000);
+
+    socket.emit("restart_initiated", {
+      timestamp: new Date().toISOString(),
+      sessionCleaned: true,
+    });
   });
 
   socket.on("disconnect", () => {
@@ -431,9 +548,12 @@ function broadcastToClients(event, data) {
 function initWhatsApp() {
   console.log("🚀 Iniciando cliente de WhatsApp...");
 
+  // Generar nueva ruta de sesión para evitar conflictos
+  generateNewSessionPath();
+
   client = new Client({
     authStrategy: new LocalAuth({
-      dataPath: "./whatsapp-session",
+      dataPath: sessionPath,
     }),
     puppeteer: {
       headless: true,
@@ -477,17 +597,43 @@ function initWhatsApp() {
     });
   });
 
-  client.on("auth_failure", (msg) => {
+  client.on("auth_failure", async (msg) => {
     console.error("❌ Error de autenticación:", msg);
     qrString = null;
-    broadcastToClients("auth_failure", { error: msg });
+    isReady = false;
+
+    // Limpiar sesión después de fallo de autenticación
+    console.log("🧹 Limpiando sesión después de fallo de autenticación...");
+    await deleteSessionFolder();
+
+    broadcastToClients("auth_failure", {
+      error: msg,
+      sessionCleaned: true,
+    });
   });
 
-  client.on("disconnected", (reason) => {
+  client.on("disconnected", async (reason) => {
     console.log("⚠️ WhatsApp desconectado. Razón:", reason);
     isReady = false;
     qrString = null;
+
     broadcastToClients("disconnected", { reason });
+
+    // Limpiar sesión automáticamente al desconectarse
+    console.log("🧹 Iniciando limpieza automática de sesión...");
+    try {
+      if (client) {
+        await client.destroy();
+      }
+    } catch (error) {
+      console.log("⚠️ Error destruyendo cliente:", error.message);
+    }
+
+    // Esperar un poco antes de limpiar la sesión
+    setTimeout(async () => {
+      await deleteSessionFolder();
+      console.log("✅ Sesión limpiada automáticamente");
+    }, 2000);
   });
 
   client.on("message", async (message) => {
@@ -551,6 +697,7 @@ function initWhatsApp() {
       return;
     }
 
+    // Verificar si el mensaje tiene contenido
     if (!message.body || message.body.trim() === "") {
       console.log(
         "   ⏭️ Ignorando: Mensaje sin contenido (posiblemente media, reacción, etc.)"
@@ -607,6 +754,7 @@ function initWhatsApp() {
       console.log(`   📊 Status: ${response.status} ${response.statusText}`);
 
       if (response.ok) {
+        // Procesar respuesta de n8n y enviar de vuelta al usuario
         try {
           const n8nResponse = await response.json();
           console.log(
@@ -614,18 +762,19 @@ function initWhatsApp() {
             JSON.stringify(n8nResponse, null, 2)
           );
 
+          // Enviar las partes de respuesta
           const userChatId = message.from;
 
           if (n8nResponse.parte_1) {
             console.log("   📩 Enviando parte 1...");
             await client.sendMessage(userChatId, n8nResponse.parte_1);
-            await new Promise((resolve) => setTimeout(resolve, 1000));
+            await new Promise((resolve) => setTimeout(resolve, 1000)); // Pausa 1 segundo
           }
 
           if (n8nResponse.parte_2) {
             console.log("   📩 Enviando parte 2...");
             await client.sendMessage(userChatId, n8nResponse.parte_2);
-            await new Promise((resolve) => setTimeout(resolve, 1000));
+            await new Promise((resolve) => setTimeout(resolve, 1000)); // Pausa 1 segundo
           }
 
           if (n8nResponse.parte_3) {
@@ -707,6 +856,7 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log("   GET  /api/status - Obtener estado");
   console.log("   GET  /api/qr - Obtener código QR");
   console.log("   POST /api/restart - Reiniciar WhatsApp");
+  console.log("   POST /api/clean-session - Limpiar sesión manualmente");
   console.log("   GET  /api/contact/:phone - Información de contacto");
   console.log("   GET  /api/chats - Lista de chats");
 
