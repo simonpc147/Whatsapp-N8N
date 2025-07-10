@@ -1,3 +1,8 @@
+IP: 168.231.68.54
+Contraseña: 4+mjv7nK5#BJ?mEln,Cc
+
+ssh root@168.231.68.54
+
 Actualizar tu VPS:
 
 # Detener la aplicación actual

@@ -627,10 +627,14 @@ function initWhatsApp() {
       console.log("⚠️ Error destruyendo cliente:", error.message);
     }
 
-    // Esperar un poco antes de limpiar la sesión
     setTimeout(async () => {
       await deleteSessionFolder();
       console.log("✅ Sesión limpiada automáticamente");
+
+      setTimeout(() => {
+        initWhatsApp();
+        console.log("🚀 Cliente reiniciado - nuevo QR será generado");
+      }, 3000);
     }, 2000);
   });
 
