@@ -28,7 +28,7 @@ let sessionPath = "./whatsapp-session"; // Variable para el path de sesión
 
 const N8N_WEBHOOK_URL =
   process.env.N8N_WEBHOOK_URL ||
-  "https://n8n.srv895959.hstgr.cloud/webhook-test/2c7ead7f-8f29-4727-854b-d2a8f20ff76a";
+  "https://n8n.srv895959.hstgr.cloud/webhook/2c7ead7f-8f29-4727-854b-d2a8f20ff76a";
 
 // ========================================
 // FUNCIONES DE LIMPIEZA DE SESIÓN
@@ -641,7 +641,7 @@ function initWhatsApp() {
   client.on("message", async (message) => {
     console.log("\n📨 MENSAJE RECIBIDO - Análisis completo:");
     console.log("   From:", message.from);
-    console.log("   Body:", `"${message.body}"`); // Comillas para ver contenido vacío
+    console.log("   Body:", `"${message.body}"`);
     console.log("   Body Length:", message.body ? message.body.length : 0);
     console.log("   Type:", message.type);
     console.log("   IsGroup:", message.isGroup);
